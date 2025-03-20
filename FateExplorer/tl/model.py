@@ -13,6 +13,10 @@ import pandas as pd
 from gensim.models import Word2Vec
 from scipy.stats import spearmanr
 from scipy.sparse import issparse
+from scipy.cluster.hierarchy import linkage, dendrogram
+from scipy.spatial.distance import pdist
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 class Clone2Vec:
     
@@ -23,6 +27,8 @@ class Clone2Vec:
         self.mt_filtered = None
         self.ncores = ncores
         self.adata = None
+        self.normalize_method=None
+        self.celltype_index = None
         self.contribution_key = None
         
     def embed(self,tokenize_method='spearman',
@@ -131,6 +137,45 @@ class Clone2Vec:
                                 normalize_method='log10',**kwargs):
         self.celltype_index = [f"{col}_{normalize_method}" for col in self.mt.columns]
         sc.pl.umap(self.adata,color=self.celltype_index,**kwargs)
+        
+    def plot_dendrogram(self,rep_use='CloneEmbed',
+                        hclust_method='average',tree_color_threshold=0.35,
+                        cmap='inferno',save=None,dpi=300):
+            
+        if self.celltype_index==None:
+            raise ValueError("Please run plot_clone_contributio function first.")
+            
+        embed = pd.DataFrame(self.adata.obsm[rep_use])
+        embed.index = self.adata.obs_names
+        hc = linkage(pdist(embed,
+                           metric='correlation'), method=hclust_method)
+
+        fig = plt.figure(figsize=(16, 8))
+        ax1 = fig.add_axes([0.05, 0.1, 0.45, 0.8])
+     
+        dendro = dendrogram(hc, labels=embed.index, orientation='left', ax=ax1, 
+                        color_threshold=tree_color_threshold, 
+                        above_threshold_color='gray', no_plot=False)
+        ordered_indices = dendro['leaves']
+        
+        ax1.set_xticks([]) 
+        ax1.set_yticks([]) 
+        ax1.spines['top'].set_visible(False)
+        ax1.spines['right'].set_visible(False)
+        ax1.spines['left'].set_visible(False)
+        ax1.spines['bottom'].set_visible(False)
+        ### add clone mt
+
+        fraction = self.adata.obs[self.celltype_index]
+        fraction_filtered = fraction.loc[fraction.index.intersection(embed.index), :]
+        fraction_filtered = fraction_filtered.iloc[ordered_indices]
+        ax2 = fig.add_axes([0.5, 0.1, 0.45, 0.8])
+        sns.heatmap(fraction_filtered, cmap=cmap, cbar=True, ax=ax2)
+        ax2.set_yticks([]) 
+        if save!=None:
+            plt.savefig(save, bbox_inches='tight', dpi=dpi)
+
+        plt.show()
 
     def map_fate_cell_manifold(self,adata,key_name = 'fate_cluster'):
         
