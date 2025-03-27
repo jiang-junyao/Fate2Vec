@@ -17,4 +17,4 @@ pip install git+https://github.com/jiang-junyao/Fate2Vec.git
 # Tutorial
 [Using FateExplorer to analyze single-cell lineage tracing data](https://jiang-junyao.github.io/Fate2Vec/sclt_larry_example) 
 
-Using FateExplorer to analyze bulk lineage tracing data (TBA, i'm looking for suitable demo data)
+[Using FateExplorer to analyze bulk lineage tracing data](https://jiang-junyao.github.io/Fate2Vec/bulk_example)
