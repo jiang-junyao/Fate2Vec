@@ -18,7 +18,7 @@ from scipy.spatial.distance import pdist
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-class Clone2Vec:
+class Fate2Vec:
     
     def __init__(self,
                  mt,
@@ -30,55 +30,105 @@ class Clone2Vec:
         self.normalize_method=None
         self.celltype_index = None
         self.contribution_key = None
-        
-    def embed(self,tokenize_method='spearman',
-              clone_size_thr=5,cor_thr=0.2,dims=5,
-                  window=5,rep_name = 'CloneEmbed',
-                  epochs = 100,sg_method=1,umap_n_neighbors=20,
-                  umap_min_dist = 0.5):
-        
-        adata = sc.AnnData(X=self.mt)
-        mt_filtered = self.mt[self.mt.sum(axis=1) >= clone_size_thr]
-        
-        ### tokenize
-        if tokenize_method=='spearman':
+    
+    def __tokenize(mt_filtered, multilineage_clones, tokenize_method='spearman', cor_thr=0.2):
+        if tokenize_method == 'spearman':
             correlation_matrix, _ = spearmanr(mt_filtered, axis=1)
-        elif tokenize_method=='pearson':
+        elif tokenize_method == 'pearson':
             correlation_matrix = np.corrcoef(mt_filtered)
         
         correlation_df = pd.DataFrame(correlation_matrix, index=mt_filtered.index, 
                                       columns=mt_filtered.index)
-        
+    
         sentences = []
         retained_clones = []
         for idx, row in correlation_df.iterrows():
-        
-            related_clones = related_clones = row[(row > cor_thr) & (row.index != idx)].sort_values(ascending=False).index
+            
+            related_clones = row[(row > cor_thr) \
+                                 & (row.index != idx)].sort_values(ascending=False).index
             sentence = list(map(str, related_clones))
-        
+    
+            if idx in multilineage_clones.index:
+    
+                additional_clones = multilineage_clones.index.difference(related_clones)
+                sorted_additional_clones = additional_clones[row.loc[additional_clones].argsort()[::-1]]
+                sentence.extend(list(map(str, sorted_additional_clones)))
+            
             if sentence:
                 sentences.append(sentence)
                 retained_clones.append(idx)
                 
+        return sentences, retained_clones
+    
+    
+    def __calculate_diversity_metrics(row):
+
+    
+        probabilities = row / row.sum()
+        
+        # Shannon Entropy
+    
+        entropy = -np.sum(probabilities * np.log2(probabilities + np.finfo(float).eps))  # 加一个小的值以避免log(0)
+        
+        # Simpson's Diversity Index
+    
+        simpson_index = 1 - np.sum(probabilities ** 2)
+        
+        return pd.Series({'Entropy': entropy, 'Simpson_Index': simpson_index})
+    
+    
+    def embed(self,tokenize_method='spearman',
+              clone_size_thr=5,cor_thr=0.2,dims=5,
+                  window=5,Simpson_Index_thr = 0.8,
+                  rep_name = 'CloneEmbed',sentence_embed=True,
+                  epochs = 100,sg_method=1,umap_n_neighbors=20,
+                  umap_min_dist = 0.5):
+        
+        ### filter clone size
+        mt_filtered = self.mt[self.mt.sum(axis=1) >= clone_size_thr]
+        adata = sc.AnnData(X=self.mt_filtered)
+        adata.obs['clone_size'] = self.mt_filtered.sum(axis=1)
+        
+        ### calculate Entropy and Simpson_Index to identify multilineage clones
+        entropies = mt_filtered.apply(self.__calculate_diversity_metrics, axis=1)
+        multilineage_clones = mt_filtered[entropies['Simpson_Index'] > Simpson_Index_thr]
+        adata.obs['Simpson_Index'] = entropies['Simpson_Index']
+        adata.obs['Entropy'] = entropies['Entropy']
+        print('Potential Multilineage clone number: '+str(len(multilineage_clones)))
+        
+        ### tokenize
+        sentences,retained_clones = self.__tokenize(mt_filtered,multilineage_clones,
+                                                    tokenize_method=tokenize_method,
+                                             cor_thr=cor_thr)
+        
+        ### filter non-correlated clones
         retained_clones_str = [str(element) for element in retained_clones]
         filtered_adata = adata[adata.obs_names.isin(retained_clones_str)]
+        
         
         ### train model
         model = Word2Vec(sentences, vector_size=dims, window=window, 
                          min_count=1, 
                          workers=self.ncores,sg=sg_method,epochs=epochs)
         
-        clone_embeddings = np.array([
-            np.mean([model.wv[word] for word in sentence], 
-                    axis=0) if sentence else np.zeros(model.vector_size)
-            for sentence in sentences
-        ])
-        filtered_adata.obsm[rep_name] = clone_embeddings
+        # embedding type: word of sentence
+        if sentence_embed:
+            embeddings = np.array([
+                    np.mean([model.wv[word] for word in sentence], 
+                            axis=0) if sentence else np.zeros(model.vector_size)
+                    for sentence in sentences
+                ])
+        else:
+            words = model.wv.index_to_key
+            embeddings = np.array([model.wv[word] for word in words])
+        
+        filtered_adata.obsm[rep_name] = embeddings
         self.mt_filtered = mt_filtered
         self.adata = filtered_adata
         sc.pp.neighbors(self.adata,use_rep=rep_name,
                         n_neighbors=umap_n_neighbors)
         sc.tl.umap(self.adata,min_dist=umap_min_dist)
+        
         
     def add_clone_contribution(self,
                               normalize_method='log10'):
@@ -98,6 +148,7 @@ class Clone2Vec:
             key_list.append(col+'_'+normalize_method)
             self.adata.obs[col+'_'+normalize_method] = \
                 mt_filtered.loc[self.adata.obs_names, col].values
+        
         
     def aggregate_clone_feature(self,
                                 adata,
@@ -133,10 +184,12 @@ class Clone2Vec:
         adata_final.obs = self.adata.obs
         self.adata =  adata_final
         
+        
     def plot_clone_contribution(self,
                                 normalize_method='log10',**kwargs):
         self.celltype_index = [f"{col}_{normalize_method}" for col in self.mt.columns]
         sc.pl.umap(self.adata,color=self.celltype_index,**kwargs)
+        
         
     def plot_dendrogram(self,rep_use='CloneEmbed',
                         hclust_method='average',tree_color_threshold=0.35,
@@ -176,6 +229,7 @@ class Clone2Vec:
             plt.savefig(save, bbox_inches='tight', dpi=dpi)
 
         plt.show()
+
 
     def map_fate_cell_manifold(self,adata,key_name = 'fate_cluster'):
         

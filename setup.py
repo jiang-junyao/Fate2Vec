@@ -1,11 +1,11 @@
 import setuptools
 
 setuptools.setup(
-    name = "FateExplorer",
+    name = "Fate2Vec",
     version = "v0.0.1",
     packages = setuptools.find_packages(),
     # Metadata
-    url = "https://github.com/jiang-junyao/FateExplorer",
+    url = "https://github.com/jiang-junyao/Fate2Vec",
     author = "Junyao Jiang",
     author_email = "jyjiang@link.cuhk.edu.hk",
     description = "Word2Vec based clone representation \
