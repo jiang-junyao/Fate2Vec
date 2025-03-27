@@ -1,0 +1,9 @@
+Metadata-Version: 2.1
+Name: Fate2Vec
+Version: 0.0.1
+Summary: Word2Vec based clone representation             and fate analysis
+Home-page: https://github.com/jiang-junyao/Fate2Vec
+Author: Junyao Jiang
+Author-email: jyjiang@link.cuhk.edu.hk
+Requires-Python: >=3.9
+License-File: LICENSE
